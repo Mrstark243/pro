@@ -6,6 +6,7 @@ import 'screens/register_screen.dart';
 import 'screens/teacher_home.dart';
 import 'screens/student_home.dart';
 import 'theme/app_theme.dart';
+import 'services/auth_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,13 +30,51 @@ class MyApp extends StatelessWidget {
       title: 'EduShare',
       theme: AppTheme.darkTheme,
       debugShowCheckedModeBanner: false,
-      initialRoute: '/',
+      home: const AuthWrapper(),
       routes: {
-        '/': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         '/teacher': (context) => const TeacherHomeScreen(),
         '/student': (context) => const StudentHomeScreen(),
+      },
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: AuthService().isLoggedIn(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SplashScreen();
+        }
+
+        if (snapshot.data == true) {
+          return FutureBuilder<Map<String, dynamic>?>(
+            future: AuthService().getCurrentUser(),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return const SplashScreen();
+              }
+
+              final user = userSnapshot.data;
+              if (user != null) {
+                if (user['role'] == 'Teacher') {
+                  return const TeacherHomeScreen();
+                } else {
+                  return const StudentHomeScreen();
+                }
+              }
+              return const LoginScreen();
+            },
+          );
+        }
+
+        return const LoginScreen();
       },
     );
   }

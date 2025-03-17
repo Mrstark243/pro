@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import '../services/screen_sharing_service.dart';
+import '../services/session_discovery_service.dart';
 import '../theme/app_theme.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import '../services/auth_service.dart';
 
 class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
@@ -13,10 +16,15 @@ class StudentHomeScreen extends StatefulWidget {
 
 class _StudentHomeScreenState extends State<StudentHomeScreen> with SingleTickerProviderStateMixin {
   final _screenSharingService = ScreenSharingService();
+  final _authService = AuthService();
   final _remoteRenderer = RTCVideoRenderer();
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   bool _isConnected = false;
+  bool _isScanning = false;
+  List<TeacherSession> _availableTeachers = [];
+  StreamSubscription<List<TeacherSession>>? _teacherSubscription;
+  String _teacherName = '';
 
   @override
   void initState() {
@@ -39,24 +47,74 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> with SingleTicker
     await _remoteRenderer.initialize();
   }
 
+  Future<void> _startScanning() async {
+    setState(() {
+      _isScanning = true;
+      _availableTeachers = [];
+    });
+
+    _teacherSubscription = _screenSharingService.discoverTeachers().listen(
+      (teachers) {
+        setState(() {
+          _availableTeachers = teachers;
+        });
+      },
+      onError: (error) {
+        _handleError(error);
+      },
+    );
+  }
+
+  Future<void> _stopScanning() async {
+    await _teacherSubscription?.cancel();
+    setState(() {
+      _isScanning = false;
+    });
+  }
+
   @override
   void dispose() {
     _remoteRenderer.dispose();
     _controller.dispose();
+    _teacherSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> _toggleConnection() async {
     HapticFeedback.mediumImpact();
     
-    setState(() {
-      _isConnected = !_isConnected;
-    });
-
     if (_isConnected) {
+      setState(() {
+        _isConnected = false;
+      });
+      _controller.reverse();
+      try {
+        await _screenSharingService.leaveSession();
+        _remoteRenderer.srcObject = null;
+      } catch (e) {
+        _handleError(e);
+      }
+    } else {
+      if (_availableTeachers.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No teacher sessions available'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+        return;
+      }
+
+      setState(() {
+        _isConnected = true;
+      });
       _controller.forward();
       try {
-        await _screenSharingService.joinSession();
+        await _screenSharingService.joinSession(_availableTeachers.first);
         // Set up remote stream when available
         if (_screenSharingService.peerConnection != null) {
           _screenSharingService.peerConnection!.onTrack = (RTCTrackEvent event) {
@@ -68,14 +126,42 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> with SingleTicker
       } catch (e) {
         _handleError(e);
       }
-    } else {
-      _controller.reverse();
-      try {
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    HapticFeedback.mediumImpact();
+    
+    // Show confirmation dialog
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout == true) {
+      // Disconnect from teacher if connected
+      if (_isConnected) {
         await _screenSharingService.leaveSession();
-        _remoteRenderer.srcObject = null;
-      } catch (e) {
-        _handleError(e);
       }
+      
+      // Logout
+      await _authService.logout();
+      
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
@@ -111,6 +197,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> with SingleTicker
             Navigator.pop(context);
           },
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _handleLogout,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -139,8 +231,33 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> with SingleTicker
               ),
             )
           else
-            const Spacer(),
-          Padding(
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_isScanning)
+                      const CircularProgressIndicator()
+                    else if (_availableTeachers.isEmpty)
+                      Text(
+                        'No teacher sessions available',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      )
+                    else
+                      Text(
+                        '${_availableTeachers.length} teacher(s) available',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: _isScanning ? _stopScanning : _startScanning,
+                      child: Text(_isScanning ? 'Stop Scanning' : 'Scan for Teachers'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Container(
             padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

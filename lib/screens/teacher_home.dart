@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/screen_sharing_service.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_service.dart';
 
 class TeacherHomeScreen extends StatefulWidget {
   const TeacherHomeScreen({super.key});
@@ -12,9 +13,11 @@ class TeacherHomeScreen extends StatefulWidget {
 
 class _TeacherHomeScreenState extends State<TeacherHomeScreen> with SingleTickerProviderStateMixin {
   final _screenSharingService = ScreenSharingService();
+  final _authService = AuthService();
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   bool _isSharing = false;
+  String _teacherName = '';
 
   @override
   void initState() {
@@ -41,23 +44,57 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> with SingleTicker
   Future<void> _toggleScreenSharing() async {
     HapticFeedback.mediumImpact();
     
-    setState(() {
-      _isSharing = !_isSharing;
-    });
-
     if (_isSharing) {
-      _controller.forward();
-      try {
-        await _screenSharingService.startHosting();
-      } catch (e) {
-        _handleError(e);
-      }
-    } else {
+      setState(() {
+        _isSharing = false;
+      });
       _controller.reverse();
       try {
         await _screenSharingService.stopHosting();
       } catch (e) {
         _handleError(e);
+      }
+    } else {
+      // Show dialog to get teacher's name
+      final name = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Enter Your Name'),
+          content: TextField(
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Your name will be shown to students',
+            ),
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final textField = context.findRenderObject() as RenderBox;
+                final text = textField.toString();
+                Navigator.pop(context, text);
+              },
+              child: const Text('Start Sharing'),
+            ),
+          ],
+        ),
+      );
+
+      if (name != null && name.isNotEmpty) {
+        setState(() {
+          _isSharing = true;
+          _teacherName = name;
+        });
+        _controller.forward();
+        try {
+          await _screenSharingService.startHosting(name);
+        } catch (e) {
+          _handleError(e);
+        }
       }
     }
   }
@@ -80,6 +117,42 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> with SingleTicker
     );
   }
 
+  Future<void> _handleLogout() async {
+    HapticFeedback.mediumImpact();
+    
+    // Show confirmation dialog
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout == true) {
+      // Stop screen sharing if active
+      if (_isSharing) {
+        await _screenSharingService.stopHosting();
+      }
+      
+      // Logout
+      await _authService.logout();
+      
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,6 +167,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> with SingleTicker
             Navigator.pop(context);
           },
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _handleLogout,
+          ),
+        ],
       ),
       body: Center(
         child: Column(
@@ -152,6 +231,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> with SingleTicker
                 ),
               ),
             ),
+            if (_isSharing) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Students can find you as: $_teacherName',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.onBackground.withOpacity(0.7),
+                ),
+              ),
+            ],
           ],
         ),
       ),

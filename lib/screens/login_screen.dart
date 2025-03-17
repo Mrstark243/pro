@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../widgets/form_widgets.dart';
 import '../services/database_helper.dart';
+import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _dbHelper = DatabaseHelper();
+  final _authService = AuthService();
   bool _isLoading = false;
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -64,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       });
 
       try {
-        final user = await _dbHelper.authenticateUser(
+        await _authService.login(
           _emailController.text.trim(),
           _passwordController.text.trim(),
         );
@@ -73,10 +75,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           _isLoading = false;
         });
 
+        if (!mounted) return;
+        
+        // Navigate based on role
+        final user = await _authService.getCurrentUser();
         if (user != null) {
-          if (!mounted) return;
-          
-          // Navigate based on role
           if (user['role'] == 'Teacher') {
             Navigator.pushReplacementNamed(context, '/teacher');
           } else {

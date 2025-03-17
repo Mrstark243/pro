@@ -1,10 +1,15 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'connection_service.dart';
+import 'session_discovery_service.dart';
 
 class ScreenSharingService {
   static final ScreenSharingService _instance = ScreenSharingService._internal();
   factory ScreenSharingService() => _instance;
 
+  final _connectionService = ConnectionService();
+  final _sessionDiscoveryService = SessionDiscoveryService();
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   bool _isHost = false;
@@ -12,12 +17,15 @@ class ScreenSharingService {
 
   ScreenSharingService._internal();
 
-  Future<void> startHosting() async {
+  Future<void> startHosting(String teacherName) async {
     _isHost = true;
     
     try {
       // Start the foreground service
       await platform.invokeMethod('startScreenSharingService');
+      
+      // Start session discovery
+      await _sessionDiscoveryService.startHosting(teacherName);
       
       // Get screen capture stream
       final Map<String, dynamic> mediaConstraints = {
@@ -53,7 +61,10 @@ class ScreenSharingService {
 
       // Set up ICE candidate handling
       _peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
-        // Store the candidate for the student to use
+        _connectionService.sendMessage(jsonEncode({
+          'type': 'candidate',
+          'candidate': candidate.toMap(),
+        }));
       };
     } catch (e) {
       print('Error starting screen sharing: $e');
@@ -65,6 +76,7 @@ class ScreenSharingService {
     try {
       _localStream?.getTracks().forEach((track) => track.stop());
       await _peerConnection?.close();
+      await _sessionDiscoveryService.stopHosting();
       await platform.invokeMethod('stopScreenSharingService');
       _isHost = false;
     } catch (e) {
@@ -73,32 +85,48 @@ class ScreenSharingService {
     }
   }
 
-  Future<void> joinSession() async {
+  Future<void> joinSession(TeacherSession teacher) async {
     _isHost = false;
     
-    // Create peer connection
-    _peerConnection = await createPeerConnection({
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'}
-      ]
-    });
+    try {
+      // Create peer connection
+      _peerConnection = await createPeerConnection({
+        'iceServers': [
+          {'urls': 'stun:stun.l.google.com:19302'}
+        ]
+      });
 
-    // Handle incoming stream
-    _peerConnection?.onTrack = (RTCTrackEvent event) {
-      if (event.track.kind == 'video') {
-        // Handle the incoming video stream
-        // This will be implemented in the UI
-      }
-    };
+      // Handle incoming stream
+      _peerConnection?.onTrack = (RTCTrackEvent event) {
+        if (event.track.kind == 'video') {
+          // Handle the incoming video stream
+          // This will be implemented in the UI
+        }
+      };
 
-    // Set up ICE candidate handling
-    _peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
-      // Store the candidate for the teacher to use
-    };
+      // Set up ICE candidate handling
+      _peerConnection?.onIceCandidate = (RTCIceCandidate candidate) {
+        _connectionService.sendMessage(jsonEncode({
+          'type': 'candidate',
+          'candidate': candidate.toMap(),
+        }));
+      };
+
+      // Connect to the teacher's session
+      await _connectionService.joinHost();
+    } catch (e) {
+      print('Error joining session: $e');
+      rethrow;
+    }
   }
 
   Future<void> leaveSession() async {
     await _peerConnection?.close();
+    _connectionService.dispose();
+  }
+
+  Stream<List<TeacherSession>> discoverTeachers() {
+    return _sessionDiscoveryService.discoverTeachers();
   }
 
   MediaStream? get localStream => _localStream;
