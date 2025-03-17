@@ -7,22 +7,54 @@ import 'screens/teacher_home.dart';
 import 'screens/student_home.dart';
 import 'theme/app_theme.dart';
 import 'services/auth_service.dart';
+import 'services/screen_sharing_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Set preferred orientations
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
+  // Set system overlay style
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: AppColors.background,
-      systemNavigationBarIconBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.dark,
     ),
   );
+
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  final _screenSharingService = ScreenSharingService();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _screenSharingService.handleAppLifecycle(state);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,11 +73,37 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
   @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  bool _showSplash = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _handleSplashScreen();
+  }
+
+  Future<void> _handleSplashScreen() async {
+    await Future.delayed(const Duration(seconds: 3));
+    if (mounted) {
+      setState(() {
+        _showSplash = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_showSplash) {
+      return const SplashScreen();
+    }
+
     return FutureBuilder<bool>(
       future: AuthService().isLoggedIn(),
       builder: (context, snapshot) {

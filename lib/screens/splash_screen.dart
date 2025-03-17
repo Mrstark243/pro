@@ -13,6 +13,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _opacityAnimation;
+  late Animation<double> _taglineOpacityAnimation;
 
   @override
   void initState() {
@@ -32,11 +33,19 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       ),
     );
 
-    // Opacity animation
+    // Opacity animation for logo and title
     _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: Curves.easeIn,
+        curve: const Interval(0.0, 0.5, curve: Curves.easeIn),
+      ),
+    );
+
+    // Opacity animation for tagline with delayed start
+    _taglineOpacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.5, 1.0, curve: Curves.easeIn),
       ),
     );
 
@@ -45,7 +54,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     // Navigate to login screen after 3 seconds
     Future.delayed(const Duration(seconds: 3), () {
-      Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     });
 
     // Enable haptic feedback
@@ -68,27 +79,41 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           builder: (context, child) {
             return Transform.scale(
               scale: _scaleAnimation.value,
-              child: Opacity(
-                opacity: _opacityAnimation.value,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Replace 'assets/logo.png' with your actual logo asset
-                    Icon(
-                      Icons.school,
-                      size: 120,
-                      color: AppColors.primary,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Opacity(
+                    opacity: _opacityAnimation.value,
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.school,
+                          size: 120,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'EduShare',
+                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                            color: AppColors.primary,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'EduShare',
-                      style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                        color: AppColors.primary,
-                        letterSpacing: 1.5,
+                  ),
+                  const SizedBox(height: 16),
+                  Opacity(
+                    opacity: _taglineOpacityAnimation.value,
+                    child: Text(
+                      'Share your screen seamlessly',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.primary.withOpacity(0.8),
+                        letterSpacing: 0.5,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },

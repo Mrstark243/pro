@@ -1,39 +1,110 @@
-import 'dart:convert';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:async';
+import 'dart:io';
 
 class ConnectionService {
   static final ConnectionService _instance = ConnectionService._internal();
   factory ConnectionService() => _instance;
 
-  WebSocketChannel? _channel;
-  Function(String)? onMessage;
-  bool _isHost = false;
+  Socket? _socket;
+  final _messageController = StreamController<String>.broadcast();
+  Stream<String> get onMessage => _messageController.stream;
+  bool _isConnected = false;
+  Timer? _reconnectTimer;
+  String? _lastHost;
+  int? _lastPort;
 
   ConnectionService._internal();
 
-  Future<void> startHosting() async {
-    _isHost = true;
-    // In a real app, you would create a WebSocket server here
-    // For now, we'll just simulate the connection
-    print('Host started');
+  bool get isConnected => _isConnected;
+
+  Future<void> connect(String host, int port) async {
+    try {
+      print('Connecting to $host:$port');
+      _lastHost = host;
+      _lastPort = port;
+      
+      _socket = await Socket.connect(host, port);
+      _isConnected = true;
+      print('Connected to $host:$port');
+
+      _socket!.listen(
+        (data) {
+          final message = String.fromCharCodes(data);
+          print('Received: $message');
+          _messageController.add(message);
+        },
+        onError: (error) {
+          print('Connection error: $error');
+          _handleDisconnection();
+        },
+        onDone: () {
+          print('Connection closed');
+          _handleDisconnection();
+        },
+      );
+
+      // Start keep-alive timer
+      _startKeepAliveTimer();
+    } catch (e) {
+      print('Error connecting: $e');
+      _handleDisconnection();
+    }
   }
 
-  Future<void> joinHost() async {
-    _isHost = false;
-    // In a real app, you would connect to the WebSocket server here
-    // For now, we'll just simulate the connection
-    print('Joined host');
+  void _handleDisconnection() {
+    _isConnected = false;
+    _socket?.close();
+    _socket = null;
+    _stopKeepAliveTimer();
+    
+    // Try to reconnect if we have last connection details
+    if (_lastHost != null && _lastPort != null) {
+      _startReconnectTimer();
+    }
+  }
+
+  void _startReconnectTimer() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!_isConnected && _lastHost != null && _lastPort != null) {
+        print('Attempting to reconnect to ${_lastHost}:${_lastPort}');
+        await connect(_lastHost!, _lastPort!);
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _startKeepAliveTimer() {
+    Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_isConnected) {
+        sendMessage('keepalive');
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _stopKeepAliveTimer() {
+    _reconnectTimer?.cancel();
   }
 
   void sendMessage(String message) {
-    if (_channel != null) {
-      _channel!.sink.add(jsonEncode(message));
+    if (_isConnected && _socket != null) {
+      try {
+        _socket!.add(message.codeUnits);
+      } catch (e) {
+        print('Error sending message: $e');
+        _handleDisconnection();
+      }
+    } else {
+      print('Cannot send message: Not connected');
     }
   }
 
   void dispose() {
-    _channel?.sink.close();
+    _stopKeepAliveTimer();
+    _socket?.close();
+    _messageController.close();
   }
-
-  bool get isHost => _isHost;
 } 
